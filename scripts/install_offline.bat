@@ -4,10 +4,6 @@ setlocal
 REM 프로젝트 루트이동
 cd /d "%~dp0.."
 
-REM 파이썬 확인
-where py >nul 2>&1
-if errorlevel 1 goto NO_PY
-
 REM 파이썬 3.11 버전 확인
 py -3.11 -c "import sys; print(sys.version)" >nul 2>&1
 if errorlevel 1 goto NO_PY311
@@ -31,11 +27,6 @@ echo install done.
 echo venv/Scripts/activate
 echo Try: (venv) ifc-tiler -i ".\test.ifc" -o ".\output" --crs_in EPSG:5186 --crs_out EPSG:4978
 endlocal
-
-:NO_PY
-echo [ERROR] 'py' launcher not found. Install Python 3.11 (x64) with py launcher.
-pause
-exit /b 1
 
 :NO_PY311
 echo [ERROR] Python 3.11 not available. Install Python 3.11 (x64).
