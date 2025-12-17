@@ -1,0 +1,13 @@
+wheel
+numpy
+psycopg2-binary
+pyproj
+pywavefront
+pyyaml
+scipy
+shapely
+alphashape
+Pillow
+ifcopenshell
+sortedcollections
+triangle
