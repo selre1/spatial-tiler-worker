@@ -9,7 +9,7 @@ here = os.path.abspath(os.path.dirname(__file__))
 requirements = (
     'wheel',
     'numpy',
-    'psycopg2',
+    'psycopg2-binary',
     'pyproj',
     'pywavefront',
     'pyyaml',
@@ -40,7 +40,8 @@ prod_requirements = (
 
 
 def read(fname):
-    return open(os.path.join(os.path.dirname(__file__), fname)).read()
+    with open(os.path.join(os.path.dirname(__file__), fname), "r", encoding="utf-8") as f:
+        return f.read()
 
 
 def find_version(*file_paths):
@@ -62,14 +63,8 @@ def find_version(*file_paths):
 
 
 setup(
-    name='py3dtilers',
+    name='GIT',
     version=find_version('py3dtilers', '__init__.py'),
-    description="Python module for computing 3D tiles",
-    long_description=read('README.md'),
-    url='https://github.com/VCityTeam/py3dtilers',
-    author='Université de Lyon',
-    author_email='contact@liris.cnrs.fr',
-    license='Apache License Version 2.0',
     python_requires=">3.8,<3.13",
     classifiers=[
         'Development Status :: 3 - Alpha',

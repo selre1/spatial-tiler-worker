@@ -1,7 +1,21 @@
+
+--no-index # 인터넷 금지 
+--find-links ./wheelhouse
+
 wheel
-numpy
-psycopg2-binary
+numpy==1.26.4
+cython
+earcut
+lz4
+numba==0.61.2
+llvmlite==0.44.0
+psutil
+pygltflib
 pyproj
+pyzmq==26.3.0
+
+psycopg2-binary
+
 pywavefront
 pyyaml
 scipy
@@ -11,3 +25,10 @@ Pillow
 ifcopenshell
 sortedcollections
 triangle
+
+# 핵심: 반드시 명시
+py3dtiles==9.0.0
+
+# (Ifctiler) 사용시 추가
+earclip==1.1
+py3dtiles-temporal-extension==1.0
