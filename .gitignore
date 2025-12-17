@@ -11,6 +11,7 @@ venv_build/
 
 py3dtilers.egg-info/
 GIT.egg-info/
+*.egg-info/
 files/
 
 /*.log
