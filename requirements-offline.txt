@@ -1,8 +1,11 @@
 
---no-index # 인터넷 금지 
+# 인터넷 금지 
+--no-index
 --find-links ./wheelhouse
 
 wheel
+
+# py3dtiles 9.0.0 호환 고정 세트
 numpy==1.26.4
 cython
 earcut
@@ -14,8 +17,10 @@ pygltflib
 pyproj
 pyzmq==26.3.0
 
+# DB
 psycopg2-binary
 
+# py3dtilers 쪽 deps
 pywavefront
 pyyaml
 scipy
@@ -26,7 +31,6 @@ ifcopenshell
 sortedcollections
 triangle
 
-# 핵심: 반드시 명시
 py3dtiles==9.0.0
 
 # (Ifctiler) 사용시 추가
