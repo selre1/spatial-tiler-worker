@@ -59,13 +59,13 @@ class Tiler():
 
         self.parser.add_argument('--crs_in',
                                  nargs='?',
-                                 default='EPSG:3946',
+                                 default='EPSG:5186',
                                  type=str,
                                  help='Input projection.')
 
         self.parser.add_argument('--crs_out',
                                  nargs='?',
-                                 default='EPSG:3946',
+                                 default='EPSG:4978',
                                  type=str,
                                  help='Output projection.')
 

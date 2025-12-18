@@ -26,7 +26,9 @@ echo.
 echo install done.
 echo venv/Scripts/activate
 echo Try: (venv) ifc-tiler -i ".\test.ifc" -o ".\output" --crs_in EPSG:5186 --crs_out EPSG:4978
+
 endlocal
+exit /b 0
 
 :NO_PY311
 echo [ERROR] Python 3.11 not available. Install Python 3.11 (x64).
