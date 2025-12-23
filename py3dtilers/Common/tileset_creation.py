@@ -6,7 +6,8 @@ from pygltflib import VEC3, FLOAT
 from py3dtiles.tileset.content import B3dm, GltfAttribute, GltfPrimitive
 from py3dtiles.tileset.content.batch_table import BatchTable
 from py3dtiles.tileset.content.b3dm_feature_table import B3dmFeatureTable
-from py3dtiles.tileset import Tile, TileSet, BoundingVolumeBox
+from py3dtiles.tileset import Tile, BoundingVolumeBox
+from ..Kit3d.tileset import Kit3DTileset
 from ..Texture import Atlas
 from ..Common import ObjWriter
 from typing import TYPE_CHECKING
@@ -35,7 +36,7 @@ class FromGeometryTreeToTileset():
         :return: a TileSet
         """
         print('Creating tileset from features...')
-        tileset = TileSet()
+        tileset = Kit3DTileset()
         root_tile = Tile(geometric_error=500, bounding_volume=BoundingVolumeBox())
         FromGeometryTreeToTileset.tile_index = 0
         FromGeometryTreeToTileset.nb_nodes = geometry_tree.get_number_of_nodes()

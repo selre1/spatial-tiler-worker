@@ -15,7 +15,7 @@ if not exist venv (
 
 call venv\Scripts\activate
 
-REM wheelhouse에서만 설치
+REM requirements 의존성을 wheelhouse에서 찾고 설치
 pip install --no-index --find-links ./wheelhouse  -r requirements.txt
 
 
