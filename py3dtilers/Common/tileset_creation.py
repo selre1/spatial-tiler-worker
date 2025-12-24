@@ -196,44 +196,114 @@ class FromGeometryTreeToTileset():
 
     @staticmethod
     def __group_by_material_index(feature_list: 'FeatureList', with_texture: int, downsample_factor=1, with_normals=True):
+        def normals_from_positions(pos: np.ndarray) -> np.ndarray:
+            # pos: (N,3) with N multiple of 3
+            p = pos.reshape(-1, 3, 3)          # (T,3,3)
+            v1 = p[:, 1] - p[:, 0]
+            v2 = p[:, 2] - p[:, 0]
+            n = np.cross(v1, v2)               # (T,3)
+            norm = np.linalg.norm(n, axis=1, keepdims=True)
+            norm[norm == 0] = 1.0
+            n = (n / norm).astype(np.float32)
+            return np.repeat(n, 3, axis=0)     # (N,3)
+
         primitives = {}
         seen_mat_indexes = []
         batch_id = 0
 
         texture_uri = Atlas(feature_list, downsample_factor).id if with_texture else None
-        for feature in feature_list:
-            mat_index = feature.material_index
 
+        def ensure_primitive(mat_index: int):
             if mat_index not in seen_mat_indexes:
                 seen_mat_indexes.append(mat_index)
                 additional_attributes_dict = {}
-                if feature.has_vertex_colors:
-                    additional_attributes_dict['COLOR_0'] = []
-                primitives[mat_index] = {'positions': [], 'normals': [], 'uvs': [], 'batchids': [], 'texture_uri': texture_uri, 'material': feature_list.get_material(mat_index), 'additional_attributes': additional_attributes_dict}
+                # vertex color 지원(있으면)
+                primitives[mat_index] = {
+                    'positions': [],
+                    'normals': [],
+                    'uvs': [],
+                    'batchids': [],
+                    'texture_uri': texture_uri,
+                    'material': feature_list.get_material(mat_index),
+                    'additional_attributes': additional_attributes_dict
+                }
+            return primitives[mat_index]
 
-            primitive = primitives[mat_index]
+        for feature in feature_list:
+            # ✅ 멀티재질 지원: feature._submesh_ranges + feature.material_index_map 가 있으면 그걸 사용
+            if hasattr(feature, "_submesh_ranges") and hasattr(feature, "material_index_map"):
+                tris = feature.get_geom_as_triangles()  # 변환(translate/crs/scale) 적용된 triangles
+
+                # (local_mat, start_tri, end_tri)
+                for (local_mat, s, e) in feature._submesh_ranges:
+                    global_mat_index = feature.material_index_map.get(local_mat, 0)
+                    primitive = ensure_primitive(global_mat_index)
+
+                    # tris[s:e] => triangles list
+                    positions = np.asarray(tris[s:e], dtype=np.float32).reshape(-1, 3)
+                    primitive['positions'].append(positions)
+
+                    if with_normals:
+                        primitive['normals'].append(normals_from_positions(positions))
+
+                    # texture/uv는 IFC에서 거의 없지만, 혹시 data가 있으면 슬라이스 시도
+                    if with_texture:
+                        try:
+                            # TriangleSoup 데이터가 vertex 단위로 저장되어 있다고 가정하고 슬라이스
+                            uv_all = feature.geom.get_data(0).astype(np.float32)
+                            vs = s * 3
+                            ve = e * 3
+                            primitive['uvs'].append(uv_all[vs:ve])
+                        except Exception:
+                            pass
+
+                    primitive['batchids'].append(np.full(len(positions), batch_id, dtype=np.uint32))
+
+                batch_id += 1
+                continue
+
+            # ✅ 기존 단일 재질 fallback
+            mat_index = getattr(feature, "material_index", 0)
+            primitive = ensure_primitive(mat_index)
 
             positions = np.array(feature.get_geom_as_triangles(), dtype=np.float32).flatten().reshape((-1, 3))
             primitive['positions'].append(positions)
-            if with_normals:
-                primitive['normals'].append(feature.geom.compute_normals())
-            if with_texture:
-                primitive['uvs'].append(feature.geom.get_data(0).astype(np.float32))
-            primitive['batchids'].append(np.full(len(positions), batch_id, dtype=np.uint32))
-            if feature.has_vertex_colors:
-                primitive['additional_attributes']['COLOR_0'].append(feature.geom.get_data(int(with_texture)).astype(np.float32))
 
+            if with_normals:
+                # 기존 방식 유지(가능하면)
+                try:
+                    primitive['normals'].append(feature.geom.compute_normals())
+                except Exception:
+                    primitive['normals'].append(normals_from_positions(positions))
+
+            if with_texture:
+                try:
+                    primitive['uvs'].append(feature.geom.get_data(0).astype(np.float32))
+                except Exception:
+                    pass
+
+            primitive['batchids'].append(np.full(len(positions), batch_id, dtype=np.uint32))
             batch_id += 1
 
         gltf_primitives = []
         for primitive in primitives.values():
             additional_attributes = []
-            for attribute in primitive['additional_attributes']:
-                additional_attributes.append(GltfAttribute(attribute, VEC3, FLOAT, np.concatenate(primitive['additional_attributes'][attribute])))
-            points = np.concatenate(primitive['positions'])
-            normals = np.concatenate(primitive['normals'], dtype=np.float32) if with_normals else None
-            uvs = np.concatenate(primitive['uvs'], dtype=np.float32) if with_texture else None
-            batchids = np.concatenate(primitive['batchids'])
-            gltf_primitives.append(GltfPrimitive(points, normals=normals, uvs=uvs, batchids=batchids, additional_attributes=additional_attributes, texture_uri=primitive['texture_uri'], material=primitive['material']))
+
+            points = np.concatenate(primitive['positions']) if primitive['positions'] else np.zeros((0,3), dtype=np.float32)
+            normals = np.concatenate(primitive['normals'], dtype=np.float32) if with_normals and primitive['normals'] else None
+            uvs = np.concatenate(primitive['uvs'], dtype=np.float32) if with_texture and primitive['uvs'] else None
+            batchids = np.concatenate(primitive['batchids']) if primitive['batchids'] else np.zeros((0,), dtype=np.uint32)
+
+            gltf_primitives.append(
+                GltfPrimitive(
+                    points,
+                    normals=normals,
+                    uvs=uvs,
+                    batchids=batchids,
+                    additional_attributes=additional_attributes,
+                    texture_uri=primitive['texture_uri'],
+                    material=primitive['material']
+                )
+            )
 
         return gltf_primitives

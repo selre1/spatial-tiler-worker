@@ -99,7 +99,7 @@ class IfcTiler(Tiler):
             for ifc_file in ifc_files:
                 try:
                     print("Reading " + str(ifc_file))
-                    if grouped_by == 'IfcTypeObject':
+                    if grouped_by == 'IfcTypeObject': # defalut
                         pre_tileset = IfcObjectsGeom.retrievObjByType(ifc_file, with_BTH)
                     elif grouped_by == 'IfcGroup':
                         pre_tileset = IfcObjectsGeom.retrievObjByGroup(ifc_file, with_BTH)

@@ -8,6 +8,7 @@ from ..Common import Feature, FeatureList, TreeWithChildrenAndParent
 from ifcopenshell import geom
 from py3dtiles.tileset.extension import BatchTableHierarchy
 import ifcopenshell.util.element
+from collections import defaultdict
 
 
 class IfcObjectGeom(Feature):
@@ -88,32 +89,69 @@ class IfcObjectGeom(Feature):
         except RuntimeError:
             logging.error("Error while creating geom with IfcOpenShell")
             return False
+        
+        g = shape.geometry
 
-        vertexList = np.reshape(np.array(shape.geometry.verts), (-1, 3))
-        indexList = np.reshape(np.array(shape.geometry.faces), (-1, 3))
+
+        vertexList = np.reshape(np.array(g.verts, dtype=np.float32), (-1, 3))
+        faceList   = np.reshape(np.array(g.faces, dtype=np.int32), (-1, 3))
+
+        if faceList.size == 0:
+            logging.error("Error while creating geom : No triangles found")
+            return False
+
         if shape.geometry.materials:
             ifc_material = shape.geometry.materials[0]
             color = [ifc_material.diffuse.r(), ifc_material.diffuse.g(), ifc_material.diffuse.b(), 1]
             self.material = ColorConfig().to_material(color)
 
-        if indexList.size == 0:
-            logging.error("Error while creating geom : No triangles found")
-            return False
+        mat_ids = None
+        if hasattr(g, "material_ids"):
+            mat_ids = np.array(g.material_ids, dtype=np.int32)
 
-        triangles = list()
-        for index in indexList:
-            triangle = []
-            for i in range(0, 3):
-                # We store each position for each triangles, as GLTF expect
-                triangle.append(vertexList[index[i]])
-            triangles.append(triangle)
+        # 길이가 안 맞으면 전부 0번 재질로 처리
+        if mat_ids is None or len(mat_ids) != len(faceList):
+            mat_ids = np.zeros(len(faceList), dtype=np.int32)
+        
+        # local material index -> glTF material(색) 매핑을 저장해둔다
+        # (나중에 FeatureList에 등록해서 global material index로 바꿀 거임)
+        self._local_materials = {}
+        if getattr(g, "materials", None):
+            for i, m in enumerate(g.materials):
+                # IfcOpenShell material diffuse 색
+                color = [m.diffuse.r(), m.diffuse.g(), m.diffuse.b(), 1]
+                self._local_materials[i] = ColorConfig().to_material(color)
 
-        self.geom.triangles.append(triangles)
+        # triangles를 material_id별로 모아서 triangles 리스트로 합친다
+        # 그리고 각 material이 triangles 리스트에서 차지하는 구간(start,end)을 기록한다.
+        from collections import defaultdict
+        faces_by_mat = defaultdict(list)
+        for fi, f in enumerate(faceList):
+            faces_by_mat[int(mat_ids[fi])].append(f)
+
+        merged_triangles = []
+        submesh_ranges = []  # (local_mat_index, start_tri, end_tri)
+
+        for local_mat, faces in faces_by_mat.items():
+            start = len(merged_triangles)
+
+            faces_arr = np.array(faces, dtype=np.int32)   # (N,3)
+            tris = vertexList[faces_arr]                  # (N,3,3)
+
+            merged_triangles.extend(tris.tolist())
+
+            end = len(merged_triangles)
+            submesh_ranges.append((int(local_mat), start, end))
+
+        # Feature(=IfcObjectGeom) 안에 재질별 구간 정보 저장
+        self._submesh_ranges = submesh_ranges
+
+        # 기존 파이프라인이 읽는 위치: geom.triangles[0]
+        self.geom.triangles.append(merged_triangles)
 
         self.set_box()
-
         return True
-
+    
     def get_obj_id(self):
         return super().get_id()
 
@@ -203,13 +241,28 @@ class IfcObjectsGeom(FeatureList):
                 logging.info("Parsing " + element.GlobalId + ", " + element.is_a())
                 obj = IfcObjectGeom(element, with_BTH=with_BTH)
                 if obj.hasGeom():
-                    if not (element.is_a() + building.GlobalId in dictObjByType):
-                        dictObjByType[element.is_a() + building.GlobalId] = IfcObjectsGeom()
-                    if obj.material:
-                        obj.material_index = dictObjByType[element.is_a() + building.GlobalId].get_material_index(obj.material)
-                    else:
-                        obj.material_index = 0
-                    dictObjByType[element.is_a() + building.GlobalId].append(obj)
+                    key = element.is_a() + building.GlobalId
+                    if key not in dictObjByType:
+                        dictObjByType[key] = IfcObjectsGeom()
+
+                    flist = dictObjByType[key]
+
+                    # local_mat -> global_mat_index 매핑 만들기
+                    obj.material_index_map = {}  # local_mat_index -> global material index
+
+                    # parse_geom에서 만든 ranges를 기준으로, 등장한 local_mat들을 등록
+                    for (local_mat, _s, _e) in getattr(obj, "_submesh_ranges", [(0, 0, len(obj.get_geom_as_triangles()))]):
+                        mat = getattr(obj, "_local_materials", {}).get(local_mat)
+
+                        if mat is None:
+                            obj.material_index_map[local_mat] = 0
+                        else:
+                            obj.material_index_map[local_mat] = flist.get_material_index(mat)
+
+                    # 기존 코드 호환
+                    obj.material_index = obj.material_index_map.get(0, 0)
+
+                    flist.append(obj)
                 logging.info("--- %s seconds ---" % (time.time() - start_time))
                 i = i + 1
         return dictObjByType
