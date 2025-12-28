@@ -15,6 +15,10 @@ class IfcObjectGeom(Feature):
         super().__init__(ifcObject.GlobalId)
         self.ifcClass = ifcObject.is_a()
         self.material = None
+        # Per-material geometry parts for a single IFC object (strategy 1)
+        # Filled in parse_geom when IfcOpenShell provides material_ids.
+        self.material_parts_local = []  # [{'local_mid': int, 'material': pygltflib.Material, 'triangles': list}]
+        self.material_parts = []        # [{'material_index': int, 'triangles': list}]
         self.ifcGroup = ifcGroup
         self.ifcSpace = ifcSpace
         self.setBatchTableData(ifcObject, ifcGroup, ifcSpace)
@@ -91,22 +95,52 @@ class IfcObjectGeom(Feature):
 
         vertexList = np.reshape(np.array(shape.geometry.verts), (-1, 3))
         indexList = np.reshape(np.array(shape.geometry.faces), (-1, 3))
-        if shape.geometry.materials:
-            ifc_material = shape.geometry.materials[0]
-            color = [ifc_material.diffuse.r(), ifc_material.diffuse.g(), ifc_material.diffuse.b(), 1]
-            self.material = ColorConfig().to_material(color)
+
+        # Build triangles and (when available) keep per-material parts.
+        # IfcOpenShell may provide:
+        # - shape.geometry.materials     : list of materials
+        # - shape.geometry.material_ids  : per-face material id (same length as indexList)
+        local_mats = list(shape.geometry.materials) if getattr(shape.geometry, "materials", None) else []
+        mat_ids = getattr(shape.geometry, "material_ids", None)
+        mat_ids_arr = None
+        if mat_ids is not None:
+            try:
+                mat_ids_arr = np.array(mat_ids, dtype=np.int32).reshape(-1)
+            except Exception:
+                mat_ids_arr = None
+        if mat_ids_arr is None or mat_ids_arr.size != len(indexList):
+            mat_ids_arr = np.zeros(len(indexList), dtype=np.int32)
 
         if indexList.size == 0:
             logging.error("Error while creating geom : No triangles found")
             return False
 
-        triangles = list()
-        for index in indexList:
+        triangles = []
+        face_indices_by_mid = {}
+
+        for fi, index in enumerate(indexList):
             triangle = []
             for i in range(0, 3):
-                # We store each position for each triangles, as GLTF expect
+                # We store each position for each triangles, as GLTF expects
                 triangle.append(vertexList[index[i]])
             triangles.append(triangle)
+
+            mid = int(mat_ids_arr[fi])
+            face_indices_by_mid.setdefault(mid, []).append(fi)
+
+        # Create per-part materials (colors) when materials exist.
+        self.material_parts_local = []
+        self.material_parts = []
+        if local_mats:
+            for mid, face_idx in face_indices_by_mid.items():
+                src_mat = local_mats[mid] if 0 <= mid < len(local_mats) else local_mats[0]
+                color = [src_mat.diffuse.r(), src_mat.diffuse.g(), src_mat.diffuse.b(), 1]
+                mat = ColorConfig().to_material(color)
+                self.material_parts_local.append({"local_mid": int(mid), "material": mat, "face_indices": face_idx})
+            # Backward compatibility: keep self.material as the first part material
+            self.material = self.material_parts_local[0]["material"]
+        else:
+            self.material = None
 
         self.geom.triangles.append(triangles)
 
@@ -205,7 +239,14 @@ class IfcObjectsGeom(FeatureList):
                 if obj.hasGeom():
                     if not (element.is_a() + building.GlobalId in dictObjByType):
                         dictObjByType[element.is_a() + building.GlobalId] = IfcObjectsGeom()
-                    if obj.material:
+                    # Strategy 1: one IFC object may contain multiple materials (e.g., sign board + letters).
+                    if getattr(obj, "material_parts_local", None):
+                        obj.material_parts = []
+                        for part in obj.material_parts_local:
+                            mat_index = dictObjByType[element.is_a() + building.GlobalId].get_material_index(part["material"])
+                            obj.material_parts.append({"material_index": mat_index, "face_indices": part["face_indices"]})
+                        obj.material_index = obj.material_parts[0]["material_index"] if obj.material_parts else 0
+                    elif obj.material:
                         obj.material_index = dictObjByType[element.is_a() + building.GlobalId].get_material_index(obj.material)
                     else:
                         obj.material_index = 0
@@ -241,7 +282,14 @@ class IfcObjectsGeom(FeatureList):
                     obj = IfcObjectGeom(element, ifcGroup=group.RelatingGroup.Name, with_BTH=with_BTH)
                     if obj.hasGeom():
                         dictObjByGroup[element.ifcGroup].append(obj)
-                    if obj.material:
+                    # Strategy 1: one IFC object may contain multiple materials (e.g., sign board + letters).
+                    if getattr(obj, "material_parts_local", None):
+                        obj.material_parts = []
+                        for part in obj.material_parts_local:
+                            mat_index = dictObjByGroup[element.ifcGroup].get_material_index(part["material"])
+                            obj.material_parts.append({"material_index": mat_index, "face_indices": part["face_indices"]})
+                        obj.material_index = obj.material_parts[0]["material_index"] if obj.material_parts else 0
+                    elif obj.material:
                         obj.material_index = dictObjByGroup[element.ifcGroup].get_material_index(obj.material)
                     else:
                         obj.material_index = 0
@@ -252,7 +300,14 @@ class IfcObjectsGeom(FeatureList):
             obj = IfcObjectGeom(element, with_BTH=with_BTH)
             if obj.hasGeom():
                 dictObjByGroup[obj.ifcGroup].append(obj)
-            if obj.material:
+            # Strategy 1: one IFC object may contain multiple materials (e.g., sign board + letters).
+            if getattr(obj, "material_parts_local", None):
+                obj.material_parts = []
+                for part in obj.material_parts_local:
+                    mat_index = dictObjByGroup[obj.ifcGroup].get_material_index(part["material"])
+                    obj.material_parts.append({"material_index": mat_index, "face_indices": part["face_indices"]})
+                obj.material_index = obj.material_parts[0]["material_index"] if obj.material_parts else 0
+            elif obj.material:
                 obj.material_index = dictObjByGroup[obj.ifcGroup].get_material_index(obj.material)
             else:
                 obj.material_index = 0
@@ -284,8 +339,15 @@ class IfcObjectsGeom(FeatureList):
             if obj.hasGeom():
                 # we put the ifcspace as any other geom in its tile
                 dictObjByIfcSpace[s.id()].append(obj)
-                if obj.material:
-                    obj.material_index = dictObjByIfcSpace[s.id()].get_material_index(obj.material)
+                # Strategy 1: one IFC object may contain multiple materials (e.g., sign board + letters).
+            if getattr(obj, "material_parts_local", None):
+                obj.material_parts = []
+                for part in obj.material_parts_local:
+                    mat_index = dictObjByIfcSpace[s.id()].get_material_index(part["material"])
+                    obj.material_parts.append({"material_index": mat_index, "face_indices": part["face_indices"]})
+                obj.material_index = obj.material_parts[0]["material_index"] if obj.material_parts else 0
+            elif obj.material:
+                obj.material_index = dictObjByIfcSpace[s.id()].get_material_index(obj.material)
             else:
                 obj.material_index = 0
 
@@ -300,8 +362,15 @@ class IfcObjectsGeom(FeatureList):
             if obj.hasGeom():
                 group = dictObjByIfcSpace[ifcspace_id_key]
                 group.append(obj)
-                if obj.material:
-                    obj.material_index = group.get_material_index(obj.material)
+                # Strategy 1: one IFC object may contain multiple materials (e.g., sign board + letters).
+            if getattr(obj, "material_parts_local", None):
+                obj.material_parts = []
+                for part in obj.material_parts_local:
+                    mat_index = group.get_material_index(part["material"])
+                    obj.material_parts.append({"material_index": mat_index, "face_indices": part["face_indices"]})
+                obj.material_index = obj.material_parts[0]["material_index"] if obj.material_parts else 0
+            elif obj.material:
+                obj.material_index = group.get_material_index(obj.material)
             else:
                 obj.material_index = 0
         return dictObjByIfcSpace

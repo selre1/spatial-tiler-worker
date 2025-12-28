@@ -196,32 +196,117 @@ class FromGeometryTreeToTileset():
 
     @staticmethod
     def __group_by_material_index(feature_list: 'FeatureList', with_texture: int, downsample_factor=1, with_normals=True):
+        """
+        Group triangles by material index, but keep a single BATCHID per original feature.
+
+        Strategy 1 support:
+        - If a feature exposes `feature.material_parts` (list of {material_index, face_indices}),
+          each part is emitted into the corresponding material bucket while sharing the same
+          `batch_id` (i.e., the same feature in the BatchTable).
+        """
+
+        def _compute_flat_normals(positions: np.ndarray) -> np.ndarray:
+            """
+            Compute per-vertex flat normals for positions where every 3 vertices form a triangle.
+            The returned array has the same shape as positions (N, 3).
+            """
+            if positions.size == 0:
+                return positions.astype(np.float32)
+            tris = positions.reshape((-1, 3, 3)).astype(np.float32)
+            v0 = tris[:, 0, :]
+            v1 = tris[:, 1, :]
+            v2 = tris[:, 2, :]
+            n = np.cross(v1 - v0, v2 - v0)
+            norm = np.linalg.norm(n, axis=1)
+            norm[norm == 0] = 1.0
+            n = (n.T / norm).T
+            return np.repeat(n, 3, axis=0).astype(np.float32)
+
         primitives = {}
-        seen_mat_indexes = []
         batch_id = 0
 
-        texture_uri = Atlas(feature_list, downsample_factor).id if with_texture else None
+        # Build atlas only if we truly have textures. Some pipelines (e.g., IFC) may provide UVs without any image.
+        atlas_id = Atlas(feature_list, downsample_factor).id if with_texture else None
+        keep_texture = bool(with_texture and atlas_id)
+        texture_uri = atlas_id if keep_texture else None
+        # If keep_texture=False, UVs must not be exported, otherwise py3dtiles will raise InvalidB3dmError.
         for feature in feature_list:
-            mat_index = feature.material_index
+            parts = getattr(feature, "material_parts", None)
 
-            if mat_index not in seen_mat_indexes:
-                seen_mat_indexes.append(mat_index)
-                additional_attributes_dict = {}
+            if parts:
+                # Splitting a feature into material parts requires per-part UVs / colors to be correct.
+                # IFC pipeline typically doesn't use atlas textures or vertex colors, so we keep this strict.
+                if keep_texture:
+                    raise NotImplementedError(
+                        "with_texture=True is not supported with feature.material_parts. "
+                        "Provide per-part UVs (and extend the pipeline) or disable textures."
+                    )
+                if getattr(feature, "has_vertex_colors", False):
+                    raise NotImplementedError(
+                        "Vertex colors are not supported with feature.material_parts yet. "
+                        "Split COLOR_0 per part before enabling this."
+                    )
+
+                for part in parts:
+                    mat_index = int(part["material_index"])
+                    if mat_index not in primitives:
+                        primitives[mat_index] = {
+                            'positions': [],
+                            'normals': [],
+                            'uvs': [],
+                            'batchids': [],
+                            'texture_uri': texture_uri,
+                            'material': feature_list.get_material(mat_index),
+                            'additional_attributes': {}
+                        }
+
+                    primitive = primitives[mat_index]
+                    all_tris = np.array(feature.get_geom_as_triangles(), dtype=np.float32)
+                    face_idx = np.array(part["face_indices"], dtype=np.int64)
+                    if face_idx.size == 0:
+                        continue
+                    tris_part = all_tris[face_idx]
+                    positions = tris_part.reshape((-1, 3)).astype(np.float32)
+                    primitive['positions'].append(positions)
+                    if with_normals:
+                        primitive['normals'].append(_compute_flat_normals(positions))
+                    primitive['batchids'].append(np.full(len(positions), batch_id, dtype=np.uint32))
+
+            else:
+                mat_index = feature.material_index
+
+                if mat_index not in primitives:
+                    additional_attributes_dict = {}
+                    if feature.has_vertex_colors:
+                        additional_attributes_dict['COLOR_0'] = []
+                    primitives[mat_index] = {
+                        'positions': [],
+                        'normals': [],
+                        'uvs': [],
+                        'batchids': [],
+                        'texture_uri': texture_uri,
+                        'material': feature_list.get_material(mat_index),
+                        'additional_attributes': additional_attributes_dict
+                    }
+
+                primitive = primitives[mat_index]
+
+                positions = np.array(feature.get_geom_as_triangles(), dtype=np.float32).flatten().reshape((-1, 3))
+                primitive['positions'].append(positions)
+                if with_normals:
+                    primitive['normals'].append(feature.geom.compute_normals())
+                if keep_texture:
+                    try:
+                        uv_data = feature.geom.get_data(0)
+                        if uv_data is not None and uv_data.size > 0:
+                            primitive['uvs'].append(uv_data.astype(np.float32))
+                    except Exception:
+                        pass
+                primitive['batchids'].append(np.full(len(positions), batch_id, dtype=np.uint32))
                 if feature.has_vertex_colors:
-                    additional_attributes_dict['COLOR_0'] = []
-                primitives[mat_index] = {'positions': [], 'normals': [], 'uvs': [], 'batchids': [], 'texture_uri': texture_uri, 'material': feature_list.get_material(mat_index), 'additional_attributes': additional_attributes_dict}
-
-            primitive = primitives[mat_index]
-
-            positions = np.array(feature.get_geom_as_triangles(), dtype=np.float32).flatten().reshape((-1, 3))
-            primitive['positions'].append(positions)
-            if with_normals:
-                primitive['normals'].append(feature.geom.compute_normals())
-            if with_texture:
-                primitive['uvs'].append(feature.geom.get_data(0).astype(np.float32))
-            primitive['batchids'].append(np.full(len(positions), batch_id, dtype=np.uint32))
-            if feature.has_vertex_colors:
-                primitive['additional_attributes']['COLOR_0'].append(feature.geom.get_data(int(with_texture)).astype(np.float32))
+                    primitive['additional_attributes']['COLOR_0'].append(
+                        feature.geom.get_data(int(with_texture)).astype(np.float32)
+                    )
 
             batch_id += 1
 
@@ -229,11 +314,18 @@ class FromGeometryTreeToTileset():
         for primitive in primitives.values():
             additional_attributes = []
             for attribute in primitive['additional_attributes']:
-                additional_attributes.append(GltfAttribute(attribute, VEC3, FLOAT, np.concatenate(primitive['additional_attributes'][attribute])))
+                additional_attributes.append(
+                    GltfAttribute(attribute, VEC3, FLOAT, np.concatenate(primitive['additional_attributes'][attribute]))
+                )
             points = np.concatenate(primitive['positions'])
-            normals = np.concatenate(primitive['normals'], dtype=np.float32) if with_normals else None
-            uvs = np.concatenate(primitive['uvs'], dtype=np.float32) if with_texture else None
+            normals = np.concatenate(primitive['normals'], dtype=np.float32) if with_normals and primitive['normals'] else None
+            uvs = np.concatenate(primitive['uvs'], dtype=np.float32) if keep_texture and primitive['uvs'] else None
             batchids = np.concatenate(primitive['batchids'])
-            gltf_primitives.append(GltfPrimitive(points, normals=normals, uvs=uvs, batchids=batchids, additional_attributes=additional_attributes, texture_uri=primitive['texture_uri'], material=primitive['material']))
+            gltf_primitives.append(
+                GltfPrimitive(points, normals=normals, uvs=uvs, batchids=batchids,
+                              additional_attributes=additional_attributes,
+                              texture_uri=primitive['texture_uri'],
+                              material=primitive['material'])
+            )
 
         return gltf_primitives
