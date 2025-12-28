@@ -78,7 +78,7 @@ class FromGeometryTreeToTileset():
         transform_offset = node.feature_list.get_centroid() + offset
 
         if not user_args.crs_in == user_args.crs_out:
-            transformer = Transformer.from_crs(user_args.crs_in, user_args.crs_out, always_xy=True)
+            transformer = Transformer.from_crs(user_args.crs_in, user_args.crs_out, always_xy=True) # 증요: always_xy 옵션 추가
             tree_centroid = np.array(transformer.transform((tree_centroid + offset)[0], (tree_centroid + offset)[1], (tree_centroid + offset)[2]))
             for feature_list in node.get_features():
                 feature_list.change_crs(transformer, offset)
