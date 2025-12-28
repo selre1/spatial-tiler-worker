@@ -196,20 +196,9 @@ class FromGeometryTreeToTileset():
 
     @staticmethod
     def __group_by_material_index(feature_list: 'FeatureList', with_texture: int, downsample_factor=1, with_normals=True):
-        """
-        Group triangles by material index, but keep a single BATCHID per original feature.
 
-        Strategy 1 support:
-        - If a feature exposes `feature.material_parts` (list of {material_index, face_indices}),
-          each part is emitted into the corresponding material bucket while sharing the same
-          `batch_id` (i.e., the same feature in the BatchTable).
-        """
-
+        # 각 삼각형 면에 대해 평면 법선 벡터를 계산하는 내부 함수
         def _compute_flat_normals(positions: np.ndarray) -> np.ndarray:
-            """
-            Compute per-vertex flat normals for positions where every 3 vertices form a triangle.
-            The returned array has the same shape as positions (N, 3).
-            """
             if positions.size == 0:
                 return positions.astype(np.float32)
             tris = positions.reshape((-1, 3, 3)).astype(np.float32)
@@ -225,29 +214,14 @@ class FromGeometryTreeToTileset():
         primitives = {}
         batch_id = 0
 
-        # Build atlas only if we truly have textures. Some pipelines (e.g., IFC) may provide UVs without any image.
-        atlas_id = Atlas(feature_list, downsample_factor).id if with_texture else None
-        keep_texture = bool(with_texture and atlas_id)
-        texture_uri = atlas_id if keep_texture else None
-        # If keep_texture=False, UVs must not be exported, otherwise py3dtiles will raise InvalidB3dmError.
+        # 이미지 적용 유무(with_texture)에 따라 Atlas 객체 생성 및 texture_uri 설정
+        # ifc는 texture가 없어서 항상 None으로 설정
+        texture_uri = Atlas(feature_list, downsample_factor).id if with_texture else None
+        # feature의 material_index별로 그룹화
         for feature in feature_list:
-            parts = getattr(feature, "material_parts", None)
-
-            if parts:
-                # Splitting a feature into material parts requires per-part UVs / colors to be correct.
-                # IFC pipeline typically doesn't use atlas textures or vertex colors, so we keep this strict.
-                if keep_texture:
-                    raise NotImplementedError(
-                        "with_texture=True is not supported with feature.material_parts. "
-                        "Provide per-part UVs (and extend the pipeline) or disable textures."
-                    )
-                if getattr(feature, "has_vertex_colors", False):
-                    raise NotImplementedError(
-                        "Vertex colors are not supported with feature.material_parts yet. "
-                        "Split COLOR_0 per part before enabling this."
-                    )
-
-                for part in parts:
+            materials_parts = getattr(feature, "material_parts", None)
+            if materials_parts:
+                for part in materials_parts:
                     mat_index = int(part["material_index"])
                     if mat_index not in primitives:
                         primitives[mat_index] = {
@@ -295,18 +269,11 @@ class FromGeometryTreeToTileset():
                 primitive['positions'].append(positions)
                 if with_normals:
                     primitive['normals'].append(feature.geom.compute_normals())
-                if keep_texture:
-                    try:
-                        uv_data = feature.geom.get_data(0)
-                        if uv_data is not None and uv_data.size > 0:
-                            primitive['uvs'].append(uv_data.astype(np.float32))
-                    except Exception:
-                        pass
+                if with_texture:
+                    primitive['uvs'].append(feature.geom.get_data(0).astype(np.float32))
                 primitive['batchids'].append(np.full(len(positions), batch_id, dtype=np.uint32))
                 if feature.has_vertex_colors:
-                    primitive['additional_attributes']['COLOR_0'].append(
-                        feature.geom.get_data(int(with_texture)).astype(np.float32)
-                    )
+                    primitive['additional_attributes']['COLOR_0'].append(feature.geom.get_data(int(with_texture)).astype(np.float32))
 
             batch_id += 1
 
@@ -314,18 +281,21 @@ class FromGeometryTreeToTileset():
         for primitive in primitives.values():
             additional_attributes = []
             for attribute in primitive['additional_attributes']:
-                additional_attributes.append(
-                    GltfAttribute(attribute, VEC3, FLOAT, np.concatenate(primitive['additional_attributes'][attribute]))
-                )
+                additional_attributes.append(GltfAttribute(attribute, VEC3, FLOAT, np.concatenate(primitive['additional_attributes'][attribute])))
             points = np.concatenate(primitive['positions'])
             normals = np.concatenate(primitive['normals'], dtype=np.float32) if with_normals and primitive['normals'] else None
-            uvs = np.concatenate(primitive['uvs'], dtype=np.float32) if keep_texture and primitive['uvs'] else None
+            uvs = np.concatenate(primitive['uvs'], dtype=np.float32) if with_texture and primitive['uvs'] else None
             batchids = np.concatenate(primitive['batchids'])
             gltf_primitives.append(
-                GltfPrimitive(points, normals=normals, uvs=uvs, batchids=batchids,
-                              additional_attributes=additional_attributes,
-                              texture_uri=primitive['texture_uri'],
-                              material=primitive['material'])
+                GltfPrimitive(
+                    points, 
+                    normals=normals, 
+                    uvs=uvs, 
+                    batchids=batchids,
+                    additional_attributes=additional_attributes,    
+                    texture_uri=primitive['texture_uri'],
+                    material=primitive['material']
+                )
             )
 
         return gltf_primitives

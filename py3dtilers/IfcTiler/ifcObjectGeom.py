@@ -15,9 +15,9 @@ class IfcObjectGeom(Feature):
         super().__init__(ifcObject.GlobalId)
         self.ifcClass = ifcObject.is_a()
         self.material = None
-        # Per-material geometry parts for a single IFC object (strategy 1)
-        # Filled in parse_geom when IfcOpenShell provides material_ids.
+        # 각 재질별 지오메트리 파트를 저장하는 리스트
         self.material_parts_local = []  # [{'local_mid': int, 'material': pygltflib.Material, 'triangles': list}]
+        # 각 재질별 지오메트리 파트를 저장하는 리스트 (재질 인덱스만 저장)
         self.material_parts = []        # [{'material_index': int, 'triangles': list}]
         self.ifcGroup = ifcGroup
         self.ifcSpace = ifcSpace
@@ -84,7 +84,8 @@ class IfcObjectGeom(Feature):
 
         try:
             settings = geom.settings()
-            settings.set(settings.USE_WORLD_COORDS, True)  # Translates and rotates the points to their world coordinates
+            # 중요한 부분 : 월드 좌표계를 사용하여 지오메트리를 생성하도록 설정
+            settings.set(settings.USE_WORLD_COORDS, True)
             if hasattr(settings, 'SEW_SHELLS'):
                 settings.set(settings.SEW_SHELLS, True)
             settings.set(settings.APPLY_DEFAULT_MATERIALS, False)
@@ -96,11 +97,6 @@ class IfcObjectGeom(Feature):
         vertexList = np.reshape(np.array(shape.geometry.verts), (-1, 3))
         indexList = np.reshape(np.array(shape.geometry.faces), (-1, 3))
 
-        # Build triangles and (when available) keep per-material parts.
-        # IfcOpenShell may provide:
-        # - shape.geometry.materials     : list of materials
-        # - shape.geometry.material_ids  : per-face material id (same length as indexList)
-        local_mats = list(shape.geometry.materials) if getattr(shape.geometry, "materials", None) else []
         mat_ids = getattr(shape.geometry, "material_ids", None)
         mat_ids_arr = None
         if mat_ids is not None:
@@ -121,16 +117,17 @@ class IfcObjectGeom(Feature):
         for fi, index in enumerate(indexList):
             triangle = []
             for i in range(0, 3):
-                # We store each position for each triangles, as GLTF expects
+                # 위치를 각 삼각형마다 저장
                 triangle.append(vertexList[index[i]])
             triangles.append(triangle)
 
             mid = int(mat_ids_arr[fi])
             face_indices_by_mid.setdefault(mid, []).append(fi)
 
-        # Create per-part materials (colors) when materials exist.
+        # 재질이 존재할 때 요서별 재질(색상) 생성.
         self.material_parts_local = []
         self.material_parts = []
+        local_mats = list(shape.geometry.materials) if getattr(shape.geometry, "materials", None) else []
         if local_mats:
             for mid, face_idx in face_indices_by_mid.items():
                 src_mat = local_mats[mid] if 0 <= mid < len(local_mats) else local_mats[0]
@@ -239,7 +236,6 @@ class IfcObjectsGeom(FeatureList):
                 if obj.hasGeom():
                     if not (element.is_a() + building.GlobalId in dictObjByType):
                         dictObjByType[element.is_a() + building.GlobalId] = IfcObjectsGeom()
-                    # Strategy 1: one IFC object may contain multiple materials (e.g., sign board + letters).
                     if getattr(obj, "material_parts_local", None):
                         obj.material_parts = []
                         for part in obj.material_parts_local:
