@@ -20,9 +20,8 @@ graph TD;
 
 ```mermaid
 graph TD;
-    사용자 정의(defalut:tileset)-->tiles;
-    사용자 정의(defalut:tileset)-->tileset.json;
-    log폴더-->요청마다 *.log 
+    output-->tiles;
+    output-->tileset.json;
 ```
 
 ## 설치방법
