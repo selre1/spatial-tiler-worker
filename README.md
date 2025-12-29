@@ -12,7 +12,7 @@
 
 ```mermaid
     graph TD;
-    IFC-->3D 공간분할-->3DTiles-->3DTiles Tilset; 
+    IFC-->3DTiles-->3DTiles Tilset; 
 ```
 
 ### Input
