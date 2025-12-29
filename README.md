@@ -3,11 +3,29 @@
 ## 요약
 
 - 웹 환경에서 대용량 3D BIM 데이터를 효율적으로 렌더링하기 위한 변환 도구입니다.
-- OBJ, GeoJSON, IFC 등 다양한 기하학 포맷을 3D Tiles로 생성하여 스트리밍 시각화를 지원합니다.
+- IFC 파일을 3D Tiles로 변환 및 생성하여 스트리밍 시각화를 지원합니다.
 ---
 
+## 3DTiles 변환
 
-## 설치
+### Input
+
+```mermaid
+graph TD;
+    ifc-->Files;
+    ifc-->Directories;
+```
+
+### Output
+
+```mermaid
+graph TD;
+    사용자 정의(defalut:tileset)-->tiles;
+    사용자 정의(defalut:tileset)-->tileset.json;
+    log폴더-->요청마다 *.log 
+```
+
+## 설치방법
 
 ### 윈도우
 
