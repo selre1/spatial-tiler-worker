@@ -8,6 +8,13 @@
 
 ## 3DTiles 변환
 
+### 변환 프로세스
+
+```mermaid
+    graph TD;
+    IFC-->3D 공간분할-->3DTiles-->3DTiles Tilset; 
+```
+
 ### Input
 
 ```mermaid
