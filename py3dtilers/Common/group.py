@@ -43,14 +43,31 @@ class Group():
         among all the materials created, and add them to the features.
         :param materials: an array of all the materials
         """
-        seen_mat_indexes = dict()
+        seen_mat_indexes = {}
         group_materials = []
+
+        def remap(old_index: int) -> int:
+            # None, 음수, 범위 밖
+            if old_index is None:
+                old_index = 0
+            old_index = int(old_index)
+            if old_index < 0 or old_index >= len(materials):
+                old_index = 0
+
+            if old_index not in seen_mat_indexes:
+                seen_mat_indexes[old_index] = len(group_materials)
+                group_materials.append(materials[old_index])
+            return seen_mat_indexes[old_index]
+
         for feature in self.feature_list:
-            mat_index = feature.material_index
-            if mat_index not in seen_mat_indexes:
-                seen_mat_indexes[mat_index] = len(group_materials)
-                group_materials.append(materials[mat_index])
-            feature.material_index = seen_mat_indexes[mat_index]
+            # feature.material_index 재매핑
+            feature.material_index = remap(getattr(feature, "material_index", 0))
+            # material_parts 안의 material_index 재매핑
+            parts = getattr(feature, "material_parts", None)
+            if parts:
+                for part in parts:
+                    part["material_index"] = remap(part.get("material_index", 0))
+
         self.feature_list.set_materials(group_materials)
 
 

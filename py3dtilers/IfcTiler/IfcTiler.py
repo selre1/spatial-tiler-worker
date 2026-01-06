@@ -110,7 +110,10 @@ class IfcTiler(Tiler):
                 except Exception as e:
                     logging.exception(f"Failed processing {ifc_file}: {e}")
             
-            groups = Groups(objects).get_groups_as_list()
+            groups = []
+            for fl in objects:
+                groups.extend(Groups(fl, polygons_path=None, kd_tree_max=800, as_lods=False).get_groups_as_list())
+
             return self.create_tileset_from_groups(groups, "batch_table_hierarchy" if with_BTH else None)
         finally:
             root.removeHandler(handler)
