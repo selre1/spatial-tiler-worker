@@ -211,7 +211,7 @@ class IfcObjectsGeom(FeatureList):
             return None
 
     @staticmethod
-    def retrievObjByType(path_to_file, with_BTH):
+    def retrievObjByType(path_to_file, with_BTH, db=None):
         """
         :param path: a path to a directory
 
@@ -246,6 +246,10 @@ class IfcObjectsGeom(FeatureList):
                         obj.material_index = dictObjByType[element.is_a() + building.GlobalId].get_material_index(obj.material)
                     else:
                         obj.material_index = 0
+                    
+                    if db is not None:
+                        db.save_ifc_object(obj)
+                        
                     dictObjByType[element.is_a() + building.GlobalId].append(obj)
                 logging.info("--- %s seconds ---" % (time.time() - start_time))
                 i = i + 1

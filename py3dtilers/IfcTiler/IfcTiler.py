@@ -6,6 +6,7 @@ from ..Common import Tiler, Groups
 from .ifcObjectGeom import IfcObjectsGeom
 
 
+from ..Kit3d.db_writer_ifc import IFCDBWriter
 
 class IfcTiler(Tiler):
 
@@ -19,10 +20,17 @@ class IfcTiler(Tiler):
                                  choices=['IfcTypeObject', 'IfcGroup', 'IfcSpace'],
                                  help='Either IfcTypeObject or IfcGroup (default: %(default)s)'
                                  )
+        
         self.parser.add_argument('--with_BTH',
                                  dest='with_BTH',
                                  action='store_true',
                                  help='Adds a Batch Table Hierarchy when defined')
+        
+        self.parser.add_argument("--db",
+            dest="db_config",
+            default="dbname=ifc user=postgres password=admin host=localhost port=5432",
+            help="PostgreSQL DSN for IFC DB , TEST Config"
+        )
 
     def get_output_dir(self):
         """
@@ -94,13 +102,16 @@ class IfcTiler(Tiler):
         root.addHandler(handler)
 
         ifc_files = self.get_valid_ifc_file()
+
+        db = IFCDBWriter(self.args.db_config, write_geom=True) 
         
         try:
             for ifc_file in ifc_files:
+                run_id = db.create_run(ifc_file)
                 try:
                     print("Reading " + str(ifc_file))
                     if grouped_by == 'IfcTypeObject':
-                        pre_tileset = IfcObjectsGeom.retrievObjByType(ifc_file, with_BTH)
+                        pre_tileset = IfcObjectsGeom.retrievObjByType(ifc_file, with_BTH, db=db)
                     elif grouped_by == 'IfcGroup':
                         pre_tileset = IfcObjectsGeom.retrievObjByGroup(ifc_file, with_BTH)
                     elif grouped_by == 'IfcSpace':
@@ -115,6 +126,7 @@ class IfcTiler(Tiler):
         finally:
             root.removeHandler(handler)
             handler.close()
+            db.close()
     
 def main():
     logging.basicConfig(
