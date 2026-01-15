@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug IfcTiler (py3dtilers)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "py3dtilers.IfcTiler.IfcTiler",
+      "args": [
+        "-i", "${workspaceFolder}/files/newone/out.ifc",
+        "-o", "${workspaceFolder}/output",
+        "--crs_in", "EPSG:5186",
+        "--crs_out", "EPSG:4978"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ]
+}
